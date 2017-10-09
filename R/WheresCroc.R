@@ -413,6 +413,7 @@ markovWC=function(moveInfo, readings, positions, edges, probs) {
     moveInfo$mem[["prevProbs"]] = vector(mode="double", length=40)
   }
   prevProbs = moveInfo$mem[["prevProbs"]]
+  
   #compute probabilities of croc being at each waterhole
   newProbs = computeProbs(observations, prevProbs, probs, neighbors)
   
@@ -421,15 +422,4 @@ markovWC=function(moveInfo, readings, positions, edges, probs) {
   
   
   return(moveInfo)
-}
-
-#Function to check if any backpackers have been eaten, and to keep track of info age
-preprocess=function(moveInfo, positions) {
-  mem=moveInfo$mem
-
-  if(length(which(positions<0))>0) {
-    lastSeen = c(location=(positions[which(positions<0)]*-1), age=10)
-    mem = c(lastSeen=lastSeen)
-  }
-  return(mem)
 }
