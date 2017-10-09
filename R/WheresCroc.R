@@ -307,7 +307,7 @@ normDistProb <- function(value, mean, std) {
   lowcut = value - interval
   highcut = value + interval
   
-  return(dnorm(highcut, mean = mean, sd = std) - dnorm(lowcut, mean = mean, sd = std))
+  return(pnorm(highcut, mean = mean, sd = std) - pnorm(lowcut, mean = mean, sd = std))
 }
 
 computeProb=function(waterhole, obs, prevProbs, probs, neighbors) {
@@ -319,15 +319,15 @@ computeProb=function(waterhole, obs, prevProbs, probs, neighbors) {
   #neighbors = list of neighbors for each node in the network (including itself)
   
   #Computes the emission probabilty from the set of obs
-  emission = normDistProb(obs[1], probs[["salinity"]][waterhole,1], probs[["salinity"]][waterhole,2])
-  emission = emission * normDistProb(obs[2], probs[["phosphate"]][waterhole,1], probs[["phosphate"]][waterhole,2])
-  emission = emission * normDistProb(obs[3], probs[["nitrogen"]][waterhole,1], probs[["nitrogen"]][waterhole,2])
+  emission = normDistProb(obs[1], probs$salinity[waterhole,1], probs$salinity[waterhole,2])
+  emission = emission * normDistProb(obs[2], probs$phosphate[waterhole,1], probs$phosphate[waterhole,2])
+  emission = emission * normDistProb(obs[3], probs$nitrogen[waterhole,1], probs$nitrogen[waterhole,2])
   
   #Figure the probability of the croc reaching a given waterhole, considering previous state
   moving = 0
-  for(n in length(neighbors[waterhole])) {
+  for(n in 1:length(neighbors[[waterhole]])) {
     neighbor = neighbors[[waterhole]][n]
-    moving = moving * (1.0/length(neighbors[[neighbor]])) * prevProbs[neighbor]
+    moving = moving + (1.0/length(neighbors[[neighbor]])) * prevProbs[neighbor]
   }
   
   return(emission*moving)
@@ -340,11 +340,11 @@ computeProbs=function(obs, prevProbs, probs, neighbors) {
   #Could probably name these better....
   
   #If this is the first turn
-  if(sum(prevProbs) == 0 || !is.nan(sum(prevProbs))) {
+  if(sum(prevProbs) == 0 || is.nan(sum(prevProbs))) {
     prevProbs = vector(mode="double", length=40)
     possibleWaterholes = 0
     for(waterhole in 1:40) {
-      if(!is.na(obs[[4]]) && !is.na(obs[[5]])) {
+      if(!is.nan(obs[[4]]) && !is.nan(obs[[5]])) {
         if(obs[[4]] == waterhole || obs[[5]] == waterhole) {
           prevProbs[waterhole] = 0 #If tourist is there, croc isn't
           next()
@@ -359,14 +359,14 @@ computeProbs=function(obs, prevProbs, probs, neighbors) {
   
   holeProbs = vector(mode="double", length=40)
   #check if tourist was eaten this turn
-  if(!is.na(obs[[4]]) && obs[[4]] < 0) {
+  if((!is.na(obs[[4]])) && (obs[[4]] < 0)) {
     croc = -obs[[4]]
     for(hole in 1:40) {
       holeProbs[hole] = 0
     }
     holeProbs[croc] = 1
   }
-  else if(!is.na(obs[[5]] && obs[[5]] < 0)) {
+  else if((!is.na(obs[[5]])) && (obs[[5]] < 0)) {
     croc = -obs[[5]]
     for(hole in 1:40) {
       holeProbs[hole] = 0
@@ -376,14 +376,13 @@ computeProbs=function(obs, prevProbs, probs, neighbors) {
   #else tourist wasn't
   else {
     for(hole in 1:40) {
-      #Computer proportional probabilites
+      #Compute proportional probabilites
       holeProbs[hole] = computeProb(hole, obs, prevProbs, probs, neighbors)
     }
   }
   
   totalProbs = sum(holeProbs)
   holeProbs = sapply(holeProbs, function(x) x/totalProbs)
-  
   return(holeProbs)
 }
 
@@ -416,10 +415,12 @@ markovWC=function(moveInfo, readings, positions, edges, probs) {
   
   #compute probabilities of croc being at each waterhole
   newProbs = computeProbs(observations, prevProbs, probs, neighbors)
+  print(newProbs)
+  browser()
   
   #Placeholder to return random move so this can run
   moveInfo$moves=c(sample(getOptions(positions[3],edges),1),0) 
   
-  
+  moveInfo$mem[["prevProbs"]] = newProbs 
   return(moveInfo)
 }
