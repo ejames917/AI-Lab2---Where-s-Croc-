@@ -1,6 +1,9 @@
 #' @export
 randomWC=function(moveInfo,readings,positions,edges,probs) {
-  moveInfo$moves=c(sample(getOptions(positions[3],edges),1),0)  
+  moveInfo$moves=c(sample(getOptions(positions[3],edges),1),0) 
+  print(moveInfo)
+  print(readings)
+  print(positions)
   return(moveInfo)
 }
 
@@ -9,9 +12,9 @@ manualWC=function(moveInfo,readings,positions,edges,probs) {
   options=getOptions(positions[3],edges)
   print("Move 1 options (plus 0 for search):")
   print(options)
-  print(probs)
-  print(readings)
-  print(edges)
+  # print(probs)
+  # print(readings)
+  # print(edges)
   mv1=readline("Move 1: ")
   if (mv1=="q") {stop()}
   if (!mv1 %in% options && mv1 != 0) {
@@ -72,8 +75,11 @@ manualWC=function(moveInfo,readings,positions,edges,probs) {
 #' @param pause The pause period between moves. Ignore this.
 #' @return A string describing the outcome of the game.
 #' @export
-runWheresCroc=function(makeMoves=manualWC,showCroc=T,pause=1) {
+runWheresCroc=function(makeMoves=markovWC,showCroc=T,pause=1) {
   positions=sample(1:40,4) # Croc, BP1, BP2, Player
+  ##### DIAGNOSTICS SO BP GETS EATEN RIGHT AWAY #####
+  positions=c(1,1,6,40)
+
   points=getPoints()
   edges=getEdges()
   probs=getProbs()
@@ -289,4 +295,141 @@ plotGameboard=function(points,edges,move,positions,showCroc) {
 #' @export
 getOptions=function(point,edges) {
   c(edges[which(edges[,1]==point),2],edges[which(edges[,2]==point),1],point)
+}
+
+########################################################
+############### Our functions start here ###############
+########################################################
+
+#Finds the probability using the dnorm function
+normDistProb <- function(value, mean, std) {
+  interval = 0.5
+  lowcut = value - interval
+  highcut = value + interval
+  
+  return(dnorm(highcut, mean = mean, sd = std) - dnorm(lowcut, mean = mean, sd = std))
+}
+
+computeProb=function(waterhole, obs, prevProbs, probs, neighbors) {
+  #Returns proportional probability of croc being at any given waterhole
+  #waterhole = number of waterhole
+  #obs = c("salinity reading", "phosphate reading", "nitrogen reading")
+  #prevProbs = vector resturned by computeProbs at previous time
+  #probs = the given probabilty list of known info
+  #neighbors = list of neighbors for each node in the network (including itself)
+  
+  #Computes the emission probabilty from the set of obs
+  emission = normDistProb(obs[1], probs[["salinity"]][waterhole,1], probs[["salinity"]][waterhole,2])
+  emission = emission * normDistProb(obs[2], probs[["phosphate"]][waterhole,1], probs[["phosphate"]][waterhole,2])
+  emission = emission * normDistProb(obs[3], probs[["nitrogen"]][waterhole,1], probs[["nitrogen"]][waterhole,2])
+  
+  #Figure the probability of the croc reaching a given waterhole, considering previous state
+  moving = 0
+  for(n in length(neighbors[waterhole])) {
+    neighbor = neighbors[[waterhole]][n]
+    moving = moving * (1.0/length(neighbors[[neighbor]])) * prevProbs[neighbor]
+  }
+  
+  return(emission*moving)
+}
+
+computeProbs=function(obs, prevProbs, probs, neighbors) {
+  #Return vector of probabilities that croc is in each waterhole
+  #Different from "computeProb" function!!!!
+  #This returns probs for EVERY watering hole, computeProb returns prob for SINGLE watering hole
+  #Could probably name these better....
+  
+  #If this is the first turn
+  if(sum(prevProbs) == 0 || !is.nan(sum(prevProbs))) {
+    prevProbs = vector(mode="double", length=40)
+    possibleWaterholes = 0
+    for(waterhole in 1:40) {
+      if(!is.na(obs[[4]]) && !is.na(obs[[5]])) {
+        if(obs[[4]] == waterhole || obs[[5]] == waterhole) {
+          prevProbs[waterhole] = 0 #If tourist is there, croc isn't
+          next()
+        }
+      }
+      prevProbs[waterhole] = 1 
+      possibleWaterholes = possibleWaterholes + 1
+    }
+    #probabilites is equal to 1/waterholes without a tourist
+    prevProbs = sapply(prevProbs, function(x) x/possibleWaterholes)
+  }
+  
+  holeProbs = vector(mode="double", length=40)
+  #check if tourist was eaten this turn
+  if(!is.na(obs[[4]]) && obs[[4]] < 0) {
+    croc = -obs[[4]]
+    for(hole in 1:40) {
+      holeProbs[hole] = 0
+    }
+    holeProbs[croc] = 1
+  }
+  else if(!is.na(obs[[5]] && obs[[5]] < 0)) {
+    croc = -obs[[5]]
+    for(hole in 1:40) {
+      holeProbs[hole] = 0
+    }
+    holeProbs[croc] = 1
+  }
+  #else tourist wasn't
+  else {
+    for(hole in 1:40) {
+      #Computer proportional probabilites
+      holeProbs[hole] = computeProb(hole, obs, prevProbs, probs, neighbors)
+    }
+  }
+  
+  totalProbs = sum(holeProbs)
+  holeProbs = sapply(holeProbs, function(x) x/totalProbs)
+  
+  return(holeProbs)
+}
+
+markovWC=function(moveInfo, readings, positions, edges, probs) {
+  #neighbors is a list of lists containing the neighbors of each waterhole
+  neighbors = list()
+  #Each waterhole is it's own neighbor
+  for(i in 1:40) {
+    neighbors[i] = list(i)
+  }
+  for(edge in 1:nrow(edges)) {
+    from = edges[edge, 1]
+    to = edges[edge, 2]
+    neighbors[[from]][length(neighbors[[from]])+1] = to
+    neighbors[[to]][length(neighbors[[to]])+1] = from
+  }
+  
+  #Put the different observations into one vector
+  observations = vector(mode="double", length=6)
+  for(i in 1:3) {
+    observations[i] = readings[[i]]
+    observations[i+3] = positions[[i]]
+  }
+  
+  #Get previous probs from memory
+  if(length(moveInfo$mem) == 0) {
+    moveInfo$mem[["prevProbs"]] = vector(mode="double", length=40)
+  }
+  prevProbs = moveInfo$mem[["prevProbs"]]
+  #compute probabilities of croc being at each waterhole
+  newProbs = computeProbs(observations, prevProbs, probs, neighbors)
+  
+  #Placeholder to return random move so this can run
+  moveInfo$moves=c(sample(getOptions(positions[3],edges),1),0) 
+  
+  
+  return(moveInfo)
+}
+
+#Function to check if any backpackers have been eaten, and to keep track of info age
+preprocess=function(moveInfo, positions) {
+  mem=moveInfo$mem
+
+  if(length(which(positions<0))>0) {
+    lastSeen = c(location=(positions[which(positions<0)]*-1), age=10)
+    mem = c(lastSeen=lastSeen)
+  }
+  return(mem)
 }
