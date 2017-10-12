@@ -78,7 +78,7 @@ manualWC=function(moveInfo,readings,positions,edges,probs) {
 runWheresCroc=function(makeMoves=markovWC,showCroc=T,pause=1) {
   positions=sample(1:40,4) # Croc, BP1, BP2, Player
   ##### DIAGNOSTICS SO BP GETS EATEN RIGHT AWAY #####
-  positions=c(1,1,6,40)
+  #positions=c(1,1,6,40)
 
   points=getPoints()
   edges=getEdges()
@@ -303,19 +303,17 @@ getOptions=function(point,edges) {
 
 #Finds the probability using the dnorm function
 normDistProb <- function(value, mean, std) {
-  interval = 0.5
+  #play with the interval to see if it gives better results
+  interval = 20.0
   lowcut = value - interval
   highcut = value + interval
   
   return(pnorm(highcut, mean = mean, sd = std) - pnorm(lowcut, mean = mean, sd = std))
 }
 
-computeProb=function(waterhole, obs, prevProbs, probs, neighbors) {
+forward=function(waterhole, obs, prevProbs, probs, neighbors) {
   #Returns proportional probability of croc being at any given waterhole
   #waterhole = number of waterhole
-  #obs = c("salinity reading", "phosphate reading", "nitrogen reading")
-  #prevProbs = vector resturned by computeProbs at previous time
-  #probs = the given probabilty list of known info
   #neighbors = list of neighbors for each node in the network (including itself)
   
   #Computes the emission probabilty from the set of obs
@@ -335,10 +333,8 @@ computeProb=function(waterhole, obs, prevProbs, probs, neighbors) {
 
 computeProbs=function(obs, prevProbs, probs, neighbors) {
   #Return vector of probabilities that croc is in each waterhole
-  #Different from "computeProb" function!!!!
-  #This returns probs for EVERY watering hole, computeProb returns prob for SINGLE watering hole
-  #Could probably name these better....
-  
+  #This returns probs for EVERY watering hole, forward returns prob for SINGLE watering hole
+
   #If this is the first turn
   if(sum(prevProbs) == 0 || is.nan(sum(prevProbs))) {
     prevProbs = vector(mode="double", length=40)
@@ -377,13 +373,42 @@ computeProbs=function(obs, prevProbs, probs, neighbors) {
   else {
     for(hole in 1:40) {
       #Compute proportional probabilites
-      holeProbs[hole] = computeProb(hole, obs, prevProbs, probs, neighbors)
+      holeProbs[hole] = forward(hole, obs, prevProbs, probs, neighbors)
     }
   }
   
   totalProbs = sum(holeProbs)
   holeProbs = sapply(holeProbs, function(x) x/totalProbs)
   return(holeProbs)
+}
+
+#BFS based implementation of movement
+BFSmove=function(crocProbs, positions, edges) {
+  #Find the max prob value
+  crocPos = 1
+  maxProb = 0
+  for(i in 1:40) {
+    if(!is.nan(crocProbs[i]) && maxProb < crocProbs[i]) {
+      crocPos = i
+      maxProb = crocProbs[i]
+    }
+  }
+  #browser()
+  graph = igraph::graph_from_edgelist(edges, directed=FALSE)
+  #results = bfs(graph, positions[3], order=TRUE, dist=TRUE, father=TRUE)
+  shortest = igraph::shortest_paths(graph, positions[3], crocPos, weights=NULL, predecessors=TRUE)
+  move = c()
+  if(length(shortest$vpath[[1]])==1) {
+    move[1] = 0
+    move[2] = 0
+  } else if(length(shortest$vpath[[1]])==2) {
+    move[1] = shortest$vpath[[1]][2]
+    move[2] = 0
+  } else {
+    move[1] = shortest$vpath[[1]][2]
+    move[2] = shortest$vpath[[1]][3]
+  }
+  return(move)
 }
 
 markovWC=function(moveInfo, readings, positions, edges, probs) {
@@ -415,11 +440,12 @@ markovWC=function(moveInfo, readings, positions, edges, probs) {
   
   #compute probabilities of croc being at each waterhole
   newProbs = computeProbs(observations, prevProbs, probs, neighbors)
-  print(newProbs)
-  browser()
-  
+
   #Placeholder to return random move so this can run
-  moveInfo$moves=c(sample(getOptions(positions[3],edges),1),0) 
+  #moveInfo$moves=c(sample(getOptions(positions[3],edges),1),0) 
+  
+  #Use BFS search to find best moves
+  moveInfo$moves = BFSmove(newProbs, positions, edges)
   
   moveInfo$mem[["prevProbs"]] = newProbs 
   return(moveInfo)
